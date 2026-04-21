@@ -1,94 +1,59 @@
-# Autonomous Terrain Navigation Using Sentinel-2 Satellite Imagery
+# Autonomous Terrain Navigation Using Sentinel-2
 
-Project developed for `Introduction to Intelligent Robotics (CC3046)`.
+Project for `Introduction to Intelligent Robotics (CC3046)`.
 
 Authors:
 - Jakub Wilk
 - Lukasz Furmanek
 - Noa Santos
 
-## Project Overview
+## Overview
 
-This project studies autonomous navigation in unstructured outdoor terrain derived from `Sentinel-2` satellite imagery. The main goal is to move a robot from point `A` to point `B` while minimizing traversal cost across different terrain types such as roads, meadows, forests, wet soil, and water.
+This project focuses on autonomous robot navigation over real terrain derived from `Sentinel-2` satellite imagery. The current system converts satellite scenes into navigable cost maps, lets the user choose a start point `A` and goal point `B`, and compares several planning approaches:
 
-The project combines:
-- remote sensing and satellite image processing,
-- terrain classification from spectral indices,
-- graph-based path planning on an `8-connected` grid,
-- local sensing with dynamic replanning,
-- reinforcement learning for route learning.
+- `Dijkstra`
+- `A*`
+- `Local-sensing A* with dynamic replanning`
+- `Q-learning`
 
-The current implementation uses a `Python-based 2D grid simulation` rather than Webots. This was an explicit design choice already justified and approved in the original proposal.
+The current implementation is a `Python 2D grid simulation`. It is the algorithmic foundation for a later integration into `Webots`, where the robot is expected to use this planning logic together with reinforcement learning to follow the planned route in simulation.
 
-## Core Idea
+## Current Goal
 
-Each satellite scene is converted into a `512 x 512` navigable grid. Every pixel becomes one traversable cell with an associated movement cost. Different planning strategies are then compared on the same terrain:
+The project currently solves this problem:
 
-- `Dijkstra` as the optimal global baseline,
-- `A*` as the efficient heuristic global baseline,
-- `Local-sensing A*` as the main proposal contribution,
-- `Q-learning` as a learned navigation policy on the same map.
+1. load a satellite-based terrain map,
+2. convert it into a traversal cost map,
+3. click point `A` and point `B`,
+4. compute a good path,
+5. visualize how the robot would move through the terrain,
+6. compare classical planning with learning-based behavior.
 
-## Input Data
+## Satellite Processing
 
-The project uses `GeoTIFF` scenes stored in the `scenes/` directory.
+The terrain model is built from multispectral `GeoTIFF` scenes stored in `scenes/`.
 
-At the moment, the repository contains scenes such as:
-- `Porto_City_512`
-- `Alentejo_Savanna_512`
-- `Serra_Estrela_Mountain_512`
-- `Porto_Export_Fixed_Types`
-- `Douro_Vineyards_512`
-
-Each scene is resized to `512 x 512` pixels. Assuming `10 m / pixel`, one map represents an area of roughly `5.12 km x 5.12 km`.
-
-## Spectral Indices Used
-
-The terrain model is built from two standard remote sensing indices.
+Each scene is resized to `512 x 512` and processed using two standard remote sensing indices:
 
 ### NDVI
-
-`NDVI` measures vegetation density:
 
 ```text
 NDVI = (NIR - RED) / (NIR + RED + epsilon)
 ```
 
-where:
-- `NIR` is the near-infrared band,
-- `RED` is the red band,
-- `epsilon` is a small constant to prevent division by zero.
-
-Interpretation:
-- low values usually correspond to roads, urban terrain, or bare soil,
-- medium values correspond to grass or sparse vegetation,
-- high values correspond to dense vegetation or forest.
+Used to estimate vegetation density.
 
 ### NDWI
-
-`NDWI` is used to detect water and moisture:
 
 ```text
 NDWI = (GREEN - NIR) / (GREEN + NIR + epsilon)
 ```
 
-where:
-- `GREEN` is the green band,
-- `NIR` is the near-infrared band.
+Used to estimate water and moisture.
 
-Interpretation:
-- high values indicate water or very wet terrain,
-- intermediate values indicate wet riverbanks, moist soil, or marshy terrain.
+## Terrain Classes and Cost Map
 
-## Terrain Classification
-
-The original proposal assumed four broad terrain classes:
-- `forest`,
-- `meadow`,
-- `road/urban`,
-- `water`.
-
-The current implementation extends this to make the navigation view more informative and to create a more expressive cost map.
+The original proposal used a simple class structure. The current implementation extends it to make the map more useful visually and more informative for planning.
 
 Current terrain classes:
 - `Water`
@@ -98,20 +63,6 @@ Current terrain classes:
 - `Meadow`
 - `Forest`
 
-Approximate classification logic:
-- `NDWI > 0.30` -> `Water`
-- `0.12 < NDWI <= 0.30` -> `Wetland`
-- very low `NDVI` and low `NDWI` -> `Road`
-- low vegetation -> `Barren`
-- medium vegetation -> `Meadow`
-- high vegetation -> `Forest`
-
-This does not contradict the proposal. It refines it so the visual output and the movement model better distinguish terrain quality.
-
-## Cost Map
-
-Each grid cell receives a traversal cost. The cost map is continuous rather than purely discrete, so the planner can differentiate between moderately good and clearly bad terrain within the same broad class.
-
 Current cost ranges:
 - `Road`: `1.0 - 1.8`
 - `Barren`: `1.6 - 3.2`
@@ -120,118 +71,59 @@ Current cost ranges:
 - `Wetland`: `10 - 25`
 - `Water`: `35 - 50`
 
-Interpretation:
-- low cost means preferred terrain,
-- high cost means difficult or undesirable terrain,
-- water is almost impassable but still represented with a finite cost to support controlled experiments.
+This means the robot naturally prefers roads and open ground, is more reluctant to cross dense vegetation or wet terrain, and treats water as almost impassable.
 
-Path cost is computed using both terrain cost and step length:
+Path cost is evaluated as:
 
 ```text
 path_cost += cell_cost * move_length
 ```
 
-where:
-- `move_length = 1` for horizontal and vertical motion,
-- `move_length = sqrt(2)` for diagonal motion.
-
-## Robot Model
-
-The robot is modeled as a point agent moving on the grid:
-- state: `(row, col)`
-- action space: 8-connected motion
-- sensor: circular local sensing radius
-- goal: fixed destination `(row, col)`
-
-In the local sensing setup, unknown space is initially treated optimistically:
-
-```text
-unknown_cost = 1.0
-```
-
-This matches the exploration strategy described in the proposal.
+where diagonal motion uses `sqrt(2)` and straight motion uses `1`.
 
 ## Implemented Algorithms
 
-### 1. Dijkstra
+### Dijkstra
 
-Global baseline using full knowledge of the map.
+Global baseline with full map knowledge. It provides the minimum-cost path and serves as the main optimal reference.
 
-Properties:
-- cost-optimal,
-- no heuristic,
-- slower on large maps than `A*`.
+### A*
 
-### 2. A*
-
-Global baseline with full map knowledge and Euclidean heuristic:
+Global baseline with Euclidean heuristic:
 
 ```text
 h(a, b) = sqrt((a_row - b_row)^2 + (a_col - b_col)^2)
 ```
 
-Properties:
-- returns the same optimal solution as `Dijkstra` when the heuristic is admissible,
-- usually evaluates fewer cells,
-- serves as the main global reference.
+It should match Dijkstra in path quality while being more efficient.
 
-### 3. Local-Sensing A* with Dynamic Replanning
+### Local-Sensing A*
 
-This is the main algorithm proposed in the project.
+This is the main proposal algorithm. The robot initially knows only local terrain and replans when newly discovered cells interfere with the current route.
 
-Execution flow:
-1. the robot initially knows only local terrain,
-2. unknown cells are treated as cheap,
-3. an initial `A*` path is planned,
-4. as the robot moves, it reveals terrain inside the sensing radius,
-5. replanning is triggered when newly discovered terrain affects the remaining planned route.
+### Q-Learning
 
-The current implementation includes an important stability improvement:
-- replanning is not triggered by every sensed update,
-- it only triggers when changed cells actually intersect the remaining route.
-
-### 4. Q-Learning
-
-The project also includes a reinforcement learning component that learns a movement policy directly on the terrain cost map.
-
-State:
-- current position `(row, col)`
-
-Actions:
-- 8 neighboring moves
-
-Update rule:
+The project also includes reinforcement learning with the standard update rule:
 
 ```text
 Q(s, a) <- Q(s, a) + alpha * (reward + gamma * max_a' Q(s', a') - Q(s, a))
 ```
 
-where:
-- `alpha` is the learning rate,
-- `gamma` is the discount factor,
-- `reward` depends on terrain cost, progress toward the goal, and goal completion.
+In the current version, Q-learning is guided by the global `A*` route and trained segment by segment so that it works reliably on large `512 x 512` maps.
 
-In the current version, RL is guided by the global `A*` route:
-- the `A*` path is used as a guidance prior,
-- long routes are split into waypoint segments,
-- `Q-learning` is trained segment by segment,
-- the final route is stitched into a complete path.
-
-This was chosen for pragmatic reasons: it makes the demo stable and keeps RL usable on large `512 x 512` maps.
-
-## Current Code Structure
+## Current Implementation
 
 ### `main.py`
 
 Responsible for:
-- loading satellite scenes,
+- loading scenes,
 - computing `NDVI` and `NDWI`,
-- classifying terrain,
-- building the continuous cost map,
-- creating the terrain-colored display layer,
-- saving processed outputs into `output/`.
+- building terrain classes,
+- generating the traversal cost map,
+- generating colored display layers,
+- saving outputs to `output/`.
 
-Generated files:
+Generated outputs include:
 - `*_cost_map.npy`
 - `*_terrain_map.npy`
 - `*_display_map.npy`
@@ -240,165 +132,106 @@ Generated files:
 ### `navigation.py`
 
 Responsible for:
-- interactive point `A/B` selection,
-- running `Dijkstra`, `A*`, `Local-sensing A*`, and `Q-learning`,
-- visualizing routes in `Pygame`,
-- animating robot movement,
-- saving learned `Q-table` weights to `*.npy`.
+- interactive `A/B` selection,
+- path computation,
+- route comparison across algorithms,
+- robot animation in `Pygame`,
+- saving learned `Q-table` weights.
 
-## Current Project Status
+## What Is Already Done
 
-The following components are already implemented:
+The following parts are already working:
 
-### Completed
+- Sentinel-2 preprocessing pipeline
+- NDVI and NDWI extraction
+- terrain classification
+- continuous traversal cost map
+- improved terrain visualization for the interactive map
+- Dijkstra baseline
+- global A*
+- local-sensing A* with dynamic replanning
+- interactive point selection
+- animated route visualization
+- Q-learning with saved weights
 
-- Sentinel-2 terrain preprocessing pipeline,
-- safe `NDVI` and `NDWI` extraction,
-- `512 x 512` cost map generation,
-- extended 6-class terrain classification,
-- terrain-aware RGB display layers for `Pygame`,
-- `Dijkstra`,
-- global `A*`,
-- `Local-sensing A*` with dynamic replanning,
-- interactive `A/B` point selection,
-- route animation and multi-algorithm visualization,
-- segmented `Q-learning`,
-- `Q-table` weight saving,
-- testing on several real scenes.
+So at this point, the project already has a working planning and simulation core.
 
-### What Already Works
+## How To Run
 
-At the current stage, the system can:
-- generate cost maps from satellite imagery,
-- open a scene in `Pygame`,
-- let the user click a start and goal point,
-- compare `Dijkstra`, `A*`, `Local sensing`, and `Q-learning`,
-- display the planned route on the terrain map,
-- report route distance, traversal cost, and replanning counts.
-
-## Observations from Current Tests
-
-For short and simple routes:
-- `Dijkstra` and `A*` usually return exactly the same result, which is expected,
-- `Local sensing` can converge to the same final path when newly sensed terrain does not invalidate the global optimum,
-- `Q-learning` often stays close to `A*`, especially on easy routes or with strong guidance.
-
-For long and difficult routes, such as `Douro_Vineyards_512`:
-- `Local sensing` can produce significantly longer and more expensive paths,
-- replanning counts can become very large,
-- `Q-learning` is usually close to the global baseline, but not always identical.
-
-This behavior is reasonable and useful for the experimental part of the project.
-
-## How to Run the Project
-
-### Requirements
-
-The project currently uses:
-- `Python 3`
-- `numpy`
-- `rasterio`
-- `matplotlib`
-- `pygame`
-- `scipy`
-
-Example installation:
+Install dependencies:
 
 ```bash
 pip install numpy rasterio matplotlib pygame scipy
 ```
 
-### Generate Cost Maps
+Generate maps:
 
 ```bash
 python main.py
 ```
 
-This script:
-- processes all `.tif` files in `scenes/`,
-- saves terrain and cost data to `output/`,
-- generates `pipeline_2x2` visual summaries.
-
-### Run Navigation
+Run the interactive navigation demo:
 
 ```bash
 python navigation.py
 ```
 
-Then:
-1. click the start point,
-2. click the goal point,
-3. wait for path computation,
-4. observe the route comparison and robot animation.
+Then click the start and goal points on the displayed map.
 
-## What Still Needs To Be Done
+## Next Steps
 
-Based on the proposal and the current implementation, the next major steps are:
+After the current stage, the main things still to do are:
 
-### Experiments and Metrics
+### 1. Validate the cost map and terrain model
 
-- run systematic comparisons of `Dijkstra`, `A*`, and `Local-sensing A*`,
-- save results to tables or CSV files,
-- automatically compute:
-  - `path length`,
-  - `path cost`,
-  - `path cost ratio`,
-  - `computation time`,
-  - `number of replannings`,
-  - `success rate`.
+The first next step is to verify whether the current terrain classes and cost matrix are really the best choice. The current setup works well, but it still needs systematic validation:
 
-### Noise Robustness
+- check whether the current terrain penalties are realistic,
+- test whether some class boundaries should be adjusted,
+- confirm whether the current cost ranges produce sensible robot behavior,
+- evaluate whether the current map representation is the right one for later robot control.
 
-- inject noise into `NDVI` and `NDWI`,
-- test different noise levels,
-- compare degradation against the noise-free baseline.
+### 2. Improve efficiency
 
-### Sensor Radius Sweep
+The next important step is to make the overall solution as efficient as possible:
 
-- evaluate different sensing radii, for example `5`, `10`, `20`, `40`,
-- measure their effect on:
-  - replanning count,
-  - path cost,
-  - computation time.
+- reduce planning time on large scenes,
+- analyze why local replanning becomes expensive on difficult maps,
+- tune parameters for more stable performance,
+- improve the computational side of the pipeline before transferring it into robot simulation.
 
-### Result Analysis
+### 3. Build the bridge toward Webots
 
-- save final path overlays as PNG files,
-- generate bar charts and comparison plots,
-- prepare per-scene and per-biome summaries.
+Based on the discussion with the professor, this project should later be connected to `Webots`.
 
-### RL Evaluation
+That means the current grid-based planner is not the final end product. It should become the high-level navigation layer that provides a route or guidance signal for a robot inside Webots.
 
-- test weaker `Q-learning` guidance from `A*`,
-- compare guided RL against less-guided RL,
-- evaluate whether the current tabular formulation should later be replaced by a more compact state representation.
+The next conceptual step is therefore:
 
-### Final Delivery Preparation
+- use the current map and planning pipeline as a high-level path generator,
+- transfer the route or waypoint structure into Webots,
+- let the simulated robot follow that route,
+- connect reinforcement learning to the robot's motion behavior so that it learns to follow the path or terrain line more robustly.
 
-- prepare `instructions.txt`,
-- formalize the experimental protocol,
-- compile final tables and figures for the paper and presentation.
+In other words, the current system already solves the planning side. The later Webots stage should solve the control and embodied robot side.
 
-## Project Stage
+### 4. Strengthen the experimental part
 
-The project is currently at the following stage:
+The remaining work should also include proper evaluation:
 
-- the satellite preprocessing pipeline is working,
-- the simulation environment is working,
-- all main demonstration algorithms are implemented,
-- the checkpoint demo is already viable,
-- the project is now transitioning from implementation into structured experimental evaluation.
+- compare global planning against local sensing on several maps,
+- measure path cost, path length, runtime, and replanning count,
+- test whether the learned policy behaves consistently on different terrains,
+- prepare cleaner result summaries for the report and presentation.
 
-In practical terms:
-- the engineering foundation is largely done,
-- the most important next step is automated experimentation, result collection, and report preparation.
+## Current Stage of the Project
 
-## Notes
+Right now, the project is in a good intermediate state:
 
-The current implementation is intentionally pragmatic. It is optimized for a stable, explainable demo and for readable terrain differentiation in the interface. Some design choices, especially in `Q-learning`, deliberately favor stability on large scenes over fully unconstrained RL behavior.
+- the terrain processing pipeline is working,
+- the planning algorithms are working,
+- reinforcement learning is already connected,
+- the interactive demo is working,
+- the next major step is validation, optimization, and later transfer to Webots.
 
-This makes the current version well suited for:
-- parameter tuning,
-- controlled comparative experiments,
-- checkpoint demonstration,
-- paper and presentation preparation.
+So the core system is already built. What remains is refining it, proving that the terrain model is good, improving efficiency, and then using it as the basis for robot behavior in Webots.
