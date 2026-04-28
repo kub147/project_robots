@@ -805,8 +805,121 @@ def run_navigation(scene_name):
     pygame.quit()
 
 
+# ─────────────────────────────────────────────
+#  WEBOTS EXPORT FUNCTION
+# ─────────────────────────────────────────────
+
+def export_webots_path(scene_name, path_cells, start, goal, display_map, cost_map, terrain_map):
+    """
+    Export a planned path and display texture for use in Webots.
+
+    This function can be called after run_navigation() to save the computed
+    path in a format that the Webots path_follower controller can read.
+
+    Args:
+        scene_name: Scene name (e.g., "Douro_Vineyards_512")
+        path_cells: List of (row, col) tuples forming the path
+        start: (row, col) start
+        goal: (row, col) goal
+        display_map: (H, W, 3) uint8 RGB display map
+        cost_map: (H, W) float32 cost map
+        terrain_map: (H, W) uint8 terrain classification
+
+    Returns:
+        Path to the exported JSON waypoint file.
+    """
+    import json
+    from PIL import Image
+
+    height, width = cost_map.shape
+    cell_size = 10.0  # m per pixel
+
+    webots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webots")
+    textures_dir = os.path.join(webots_dir, "worlds", "textures")
+    paths_dir = os.path.join(webots_dir, "paths")
+    os.makedirs(textures_dir, exist_ok=True)
+    os.makedirs(paths_dir, exist_ok=True)
+
+    # ── Export display texture ──
+    img = Image.fromarray(display_map, mode="RGB")
+    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+    tex_path = os.path.join(textures_dir, f"{scene_name}_display.png")
+    img.save(tex_path)
+    img.save(os.path.join(textures_dir, "current_display.png"))
+    print(f"  ✓  Exported display texture: {tex_path}")
+
+    # ── Build waypoints ──
+    def grid_to_world(row, col):
+        x = col * cell_size - (width * cell_size / 2.0)
+        z = row * cell_size - (height * cell_size / 2.0)
+        return round(x, 2), round(z, 2)
+
+    waypoints = []
+    for i, (row, col) in enumerate(path_cells):
+        wx, wz = grid_to_world(row, col)
+        waypoints.append({
+            "index": i,
+            "row": int(row),
+            "col": int(col),
+            "x_m": wx,
+            "z_m": wz,
+        })
+
+    # Metrics
+    total_dist = 0.0
+    total_cost = 0.0
+    for a, b in zip(path_cells[:-1], path_cells[1:]):
+        dr = b[0] - a[0]
+        dc = b[1] - a[1]
+        step = math.sqrt(dr * dr + dc * dc)
+        total_dist += step
+        total_cost += float(cost_map[b]) * step
+
+    data = {
+        "meta": {
+            "scene": scene_name,
+            "map_height_px": height,
+            "map_width_px": width,
+            "cell_size_m": cell_size,
+            "map_center_x_m": 0.0,
+            "map_center_z_m": 0.0,
+            "map_extent_min_x_m": -(width * cell_size / 2.0),
+            "map_extent_min_z_m": -(height * cell_size / 2.0),
+            "map_extent_max_x_m": width * cell_size / 2.0,
+            "map_extent_max_z_m": height * cell_size / 2.0,
+        },
+        "start": {
+            "row": int(start[0]),
+            "col": int(start[1]),
+            "x_m": grid_to_world(start[0], start[1])[0],
+            "z_m": grid_to_world(start[0], start[1])[1],
+        },
+        "goal": {
+            "row": int(goal[0]),
+            "col": int(goal[1]),
+            "x_m": grid_to_world(goal[0], goal[1])[0],
+            "z_m": grid_to_world(goal[0], goal[1])[1],
+        },
+        "path": waypoints,
+        "metrics": {
+            "num_waypoints": len(waypoints),
+            "distance_px": round(total_dist, 1),
+            "distance_m": round(total_dist * cell_size, 1),
+            "cumulative_cost": round(total_cost, 1),
+        },
+    }
+
+    filename = f"{scene_name}_path_{start[0]}_{start[1]}_{goal[0]}_{goal[1]}.json"
+    path_file = os.path.join(paths_dir, filename)
+    with open(path_file, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  ✓  Exported waypoints: {path_file}")
+    print(f"  ℹ  Open webots/worlds/terrain_navigation.wbt in Webots to visualize.")
+    return path_file
+
+
 if __name__ == "__main__":
-    #run_navigation("Douro_Vineyards_512")
-    run_navigation("Porto_City_512")
+    run_navigation("Douro_Vineyards_512")
+    #run_navigation("Porto_City_512")
     #run_navigation("Serra_Estrela_Mountain_512")
     #run_navigation("Alentejo_Savanna_512")
