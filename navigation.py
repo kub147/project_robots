@@ -19,7 +19,7 @@ import pygame
 
 OUTPUT_DIR = "output"
 WINDOW_SIZE = 860
-PANEL_WIDTH = 360
+PANEL_WIDTH = 520
 UNKNOWN_COST = 1.0
 MAX_CELL_COST = 50.0
 LOCAL_SENSOR_RADIUS = 20
@@ -37,7 +37,8 @@ ACTIONS = [
     (1, -1),
     (1, 1),
 ]
-ACTION_COSTS = [1.0, 1.0, 1.0, 1.0, math.sqrt(2), math.sqrt(2), math.sqrt(2), math.sqrt(2)]
+M_SQRT2 = math.sqrt(2)
+ACTION_COSTS = [1.0, 1.0, 1.0, 1.0, M_SQRT2, M_SQRT2, M_SQRT2, M_SQRT2]
 
 # Terrain classes aligned with main.py.
 TERRAIN_NAMES = {
@@ -156,7 +157,7 @@ def path_metrics(path, cost_map):
     for current, nxt in zip(path[:-1], path[1:]):
         dr = nxt[0] - current[0]
         dc = nxt[1] - current[1]
-        step_distance = math.sqrt(2) if dr and dc else 1.0
+        step_distance = M_SQRT2 if dr and dc else 1.0
         total_distance += step_distance
         step_cost = float(cost_map[nxt])
         total_cell_cost += step_cost
@@ -189,7 +190,9 @@ class GridPlanner:
 
     @staticmethod
     def heuristic(a, b):
-        return math.hypot(a[0] - b[0], a[1] - b[1])
+        dr = abs(a[0] - b[0])
+        dc = abs(a[1] - b[1])
+        return max(dr, dc) + (M_SQRT2 - 1.0) * min(dr, dc)
 
     def _neighbors(self, node):
         row, col = node
@@ -239,6 +242,7 @@ class QLearningNavigator:
         self.start = start
         self.goal = goal
         self.q_table = np.zeros((self.height, self.width, len(ACTIONS)), dtype=np.float32)
+        self._goal = goal
         self.guidance_mask = np.zeros((self.height, self.width), dtype=bool)
         self.expert_action = np.full((self.height, self.width), -1, dtype=np.int8)
         if guidance_path:
@@ -254,6 +258,12 @@ class QLearningNavigator:
                     action_idx = ACTIONS.index(delta)
                     self.expert_action[current[0], current[1]] = action_idx
                     self.q_table[current[0], current[1], action_idx] = 4.0
+
+    @staticmethod
+    def _fast_dist(r1, c1, r2, c2):
+        dr = abs(r1 - r2)
+        dc = abs(c1 - c2)
+        return max(dr, dc) + (M_SQRT2 - 1.0) * min(dr, dc)
 
     def choose_action(self, state, epsilon, expert_rate):
         expert_idx = int(self.expert_action[state[0], state[1]])
@@ -271,11 +281,13 @@ class QLearningNavigator:
             return state, QL_INVALID_MOVE_PENALTY, False
 
         nxt = (nr, nc)
-        old_distance = GridPlanner.heuristic(state, self.goal)
-        new_distance = GridPlanner.heuristic(nxt, self.goal)
+        sr, sc = state
+        gr, gc = self._goal
+        old_dist = self._fast_dist(sr, sc, gr, gc)
+        new_dist = self._fast_dist(nr, nc, gr, gc)
 
         reward = -float(self.cost_map[nxt]) * QL_COST_WEIGHT
-        reward += (old_distance - new_distance) * QL_PROGRESS_WEIGHT
+        reward += (old_dist - new_dist) * QL_PROGRESS_WEIGHT
         if self.guidance_mask[nxt]:
             reward += QL_ASTAR_BONUS
         done = nxt == self.goal
@@ -291,9 +303,20 @@ class QLearningNavigator:
         best_path = None
         best_cost = float("inf")
 
+        h, w = self.height, self.width
+        goal = self.goal
+        q_table = self.q_table
+        cost_map = self.cost_map
+        guidance_mask = self.guidance_mask
+        actions = ACTIONS
+        n_actions = len(actions)
+        goali, goalj = goal
+
         for episode in range(episodes):
             state = self.start
-            visited = {state}
+            si, sj = state
+            visited = np.zeros((h, w), dtype=bool)
+            visited[si, sj] = True
             total_reward = 0.0
             path = [state]
             stagnation = 0
@@ -302,27 +325,45 @@ class QLearningNavigator:
 
             for _ in range(max_steps):
                 action_idx = self.choose_action(state, epsilon, expert_rate)
-                nxt, reward, done = self.next_state(state, action_idx)
+                dr, dc = actions[action_idx]
+                ni = si + dr
+                nj = sj + dc
 
-                if nxt in visited and nxt != self.goal:
+                if ni < 0 or ni >= h or nj < 0 or nj >= w:
+                    reward = QL_INVALID_MOVE_PENALTY
+                    nxt = state
+                    done = False
+                else:
+                    nxt = (ni, nj)
+                    old_dist = self._fast_dist(si, sj, goali, goalj)
+                    new_dist = self._fast_dist(ni, nj, goali, goalj)
+                    reward = -float(cost_map[ni, nj]) * QL_COST_WEIGHT
+                    reward += (old_dist - new_dist) * QL_PROGRESS_WEIGHT
+                    if guidance_mask[ni, nj]:
+                        reward += QL_ASTAR_BONUS
+                    done = nxt == goal
+                    if done:
+                        reward += QL_GOAL_REWARD
+
+                if visited[ni, nj] and not done:
                     reward += QL_REPEAT_PENALTY
                     stagnation += 1
                 else:
                     stagnation = 0
 
-                current_q = self.q_table[state[0], state[1], action_idx]
-                best_future = np.max(self.q_table[nxt[0], nxt[1]])
-                updated_q = current_q + QL_ALPHA * (reward + QL_GAMMA * best_future - current_q)
-                self.q_table[state[0], state[1], action_idx] = updated_q
+                current_q = q_table[si, sj, action_idx]
+                best_future = max(q_table[ni, nj])
+                q_table[si, sj, action_idx] = current_q + QL_ALPHA * (reward + QL_GAMMA * best_future - current_q)
 
                 state = nxt
+                si, sj = ni, nj
                 path.append(state)
-                visited.add(state)
+                visited[ni, nj] = True
                 total_reward += reward
 
                 if done:
                     success_count += 1
-                    candidate_cost = path_metrics(path, self.cost_map)["cost"]
+                    candidate_cost = path_metrics(path, cost_map)["cost"]
                     if candidate_cost < best_cost:
                         best_cost = candidate_cost
                         best_path = path[:]
@@ -344,19 +385,22 @@ class QLearningNavigator:
             "rewards": rewards,
             "success_rate": success_count / max(1, episodes),
             "best_path": best_path,
-            "q_table": self.q_table,
-            "q_min": float(self.q_table.min()),
-            "q_max": float(self.q_table.max()),
-            "q_mean": float(self.q_table.mean()),
+            "q_table": q_table,
+            "q_min": float(q_table.min()),
+            "q_max": float(q_table.max()),
+            "q_mean": float(q_table.mean()),
         }
 
     def rollout(self, max_steps=QL_MAX_STEPS):
         state = self.start
         path = [state]
-        seen = {state}
+        h, w = self.height, self.width
+        goal = self.goal
+        seen_arr = np.zeros((h, w), dtype=bool)
+        seen_arr[state[0], state[1]] = True
 
         for _ in range(max_steps):
-            if state == self.goal:
+            if state == goal:
                 return path
 
             q_values = self.q_table[state[0], state[1]]
@@ -365,20 +409,21 @@ class QLearningNavigator:
 
             for action_idx in action_order:
                 dr, dc = ACTIONS[int(action_idx)]
-                nxt = (state[0] + dr, state[1] + dc)
-                if 0 <= nxt[0] < self.height and 0 <= nxt[1] < self.width:
-                    if nxt in seen and nxt != self.goal:
+                nr = state[0] + dr
+                nc = state[1] + dc
+                if 0 <= nr < h and 0 <= nc < w:
+                    if seen_arr[nr, nc] and (nr, nc) != goal:
                         continue
-                    state = nxt
+                    state = (nr, nc)
                     path.append(state)
-                    seen.add(state)
+                    seen_arr[nr, nc] = True
                     moved = True
                     break
 
             if not moved:
                 return None
 
-        return path if path[-1] == self.goal else None
+        return path if path[-1] == goal else None
 
 
 class LocalSensingNavigator:
@@ -520,12 +565,12 @@ def render_dashboard(
                 1,
             )
 
-    panel_rect = pygame.Rect(map_width, 0, PANEL_WIDTH, map_height)
+    panel_rect = pygame.Rect(map_width, 0, PANEL_WIDTH, screen.get_height())
     pygame.draw.rect(screen, (28, 30, 36), panel_rect)
-    pygame.draw.line(screen, (65, 70, 78), (map_width, 0), (map_width, map_height), 2)
+    pygame.draw.line(screen, (65, 70, 78), (map_width, 0), (map_width, screen.get_height()), 2)
 
-    font = pygame.font.SysFont("consolas", 20)
-    small_font = pygame.font.SysFont("consolas", 16)
+    font = pygame.font.SysFont("consolas", 22)
+    small_font = pygame.font.SysFont("consolas", 18)
     screen.blit(font.render("Terrain Navigation Demo", True, (245, 245, 245)), (map_width + 18, 18))
 
     legend = [
@@ -534,17 +579,17 @@ def render_dashboard(
         ("Local A*", (255, 196, 0)),
         ("Q-learning", (255, 0, 180)),
     ]
-    y = 58
+    y = 62
     for label, color in legend:
         pygame.draw.line(screen, color, (map_width + 18, y + 9), (map_width + 58, y + 9), 4)
         screen.blit(small_font.render(label, True, (220, 220, 220)), (map_width + 70, y))
-        y += 24
+        y += 28
 
     y += 8
     for line in metrics_lines:
         rendered = small_font.render(line, True, (220, 220, 220))
         screen.blit(rendered, (map_width + 18, y))
-        y += 20
+        y += 24
 
 
 def build_metrics_lines(dijkstra_path, astar_path, local_result, rl_result, cost_map, terrain_map, train_time):
@@ -570,7 +615,12 @@ def build_metrics_lines(dijkstra_path, astar_path, local_result, rl_result, cost
 
     if rl_result["best_path"]:
         hist = terrain_histogram(rl_result["best_path"], terrain_map)
-        lines.append(f"RL terrain cells: {format_histogram(hist)}")
+        lines.append("RL terrain cells:")
+        for name, count in hist.items():
+            if count > 0:
+                lines.append(f"  {name}: {count}")
+        if all(c == 0 for c in hist.values()):
+            lines.append("  (none)")
 
     return lines
 
@@ -704,7 +754,9 @@ def run_navigation(scene_name):
     scale = compute_scale(height, width)
     map_surface = pygame.surfarray.make_surface(normalize_to_surface(cost_map, display_map).swapaxes(0, 1))
     map_surface = pygame.transform.scale(map_surface, (width * scale, height * scale))
-    screen = pygame.display.set_mode((width * scale + PANEL_WIDTH, height * scale))
+    # Window height must accommodate both map and tall panel content
+    window_height = max(height * scale, 620)
+    screen = pygame.display.set_mode((width * scale + PANEL_WIDTH, window_height))
     pygame.display.set_caption("Sentinel-2 path planning and RL")
 
     metrics_lines = build_metrics_lines(
@@ -754,7 +806,7 @@ def run_navigation(scene_name):
 
 
 if __name__ == "__main__":
-    run_navigation("Douro_Vineyards_512")
-    #run_navigation("Porto_City_512")
+    #run_navigation("Douro_Vineyards_512")
+    run_navigation("Porto_City_512")
     #run_navigation("Serra_Estrela_Mountain_512")
     #run_navigation("Alentejo_Savanna_512")
