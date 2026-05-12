@@ -1,163 +1,92 @@
 #VRML_SIM R2025a utf8
-# Terrain Navigation World
-# Simplified robot + visible ground
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 
 WorldInfo {
-  title "Terrain Navigation"
+  title "Terrain Navigation - Top Down Debug"
   basicTimeStep 16
-  northDirection [0 0 1]   # explicitly: +Z is North
+  northDirection [0 0 1]
 }
 
 Viewpoint {
-  orientation 0 0 1 -0.26
-  position 0 8500 0
-  fieldOfView 0.6
-  follow "robot"
-  followType "Tracking Shot"
-  followSmoothness 2.0
+  orientation 1 0 0 -1.5708
+  position 0 7200 0
+  fieldOfView 0.75
+  description "Top view"
 }
 
-TexturedBackground { }
-TexturedBackgroundLight { }
+Background {
+  skyColor [
+    0.78 0.82 0.88
+  ]
+}
 
 DirectionalLight {
-  direction 0.5 -1 0.3
+  direction 0 -1 0
   intensity 1.5
-  castShadows TRUE
 }
 
-# ── VISUAL GROUND (textured plane) ──
 Solid {
-  name "visual_ground"
-  translation 0 0 0
+  name "terrain_map"
+  translation 0 -0.05 0
   children [
     Shape {
       appearance PBRAppearance {
         baseColorMap ImageTexture {
-          url ["textures/current_display.png"]
-          repeatT FALSE repeatS FALSE
+          url [
+            "textures/current_display.png"
+          ]
+          repeatS FALSE
+          repeatT FALSE
         }
-        roughness 0.9
-        metalness 0.0
+        roughness 1
+        metalness 0
       }
-      geometry Plane { size 5120 5120 }
+      geometry Box {
+        size 5120 0.1 5120
+      }
     }
   ]
   locked TRUE
 }
 
-# ── PHYSICS GROUND (collision) ──
-Solid {
-  name "physics_ground"
-  translation 0 -0.2 0
+Robot {
+  name "robot"
+  translation -2010 8 -2040
+  rotation 0 1 0 0
+  controller "void"
   children [
+    GPS {
+      name "gps"
+    }
+    Compass {
+      name "compass"
+    }
     Shape {
       appearance PBRAppearance {
-        baseColor 0.5 0.5 0.5
-        transparency 1
+        baseColor 0.05 0.35 1
+        roughness 0.4
       }
-      geometry Box { size 5120 0.4 5120 }
+      geometry Cylinder {
+        radius 55
+        height 10
+      }
+    }
+    Transform {
+      translation 0 8 42
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 1 0.05 0.02
+            roughness 0.4
+          }
+          geometry Box {
+            size 22 8 70
+          }
+        }
+      ]
     }
   ]
-  locked TRUE
-}
-
-# ── ROBOT — Simple differential drive ──
-Robot {
-  translation -2010 0.12 -2040
-  rotation 0 1 0 0
-  controller "path_follower"
-  controllerArgs ["--scene", "Porto_City_512", "--start", "52", "55", "--goal", "462", "455"]
-  supervisor FALSE
-  selfCollision FALSE
-  children [
-    GPS { name "gps" resolution 0.1 }
-    Compass { name "compass" resolution 0.01 }
-    Gyro { name "gyro" resolution 0.01 }
-
-    # Body
-    DEF BODY Shape {
-      appearance PBRAppearance { baseColor 0.2 0.4 0.8 roughness 0.4 }
-      geometry Box { size 0.5 0.16 0.5 }
-    }
-    # Red front marker
-    Transform { translation 0.25 0.05 0
-      children [ Shape {
-        appearance PBRAppearance { baseColor 1 0.2 0.2 roughness 0.3 }
-        geometry Box { size 0.08 0.05 0.12 }
-      }]
-    }
-
-    # Left wheel
-    DEF LEFT_WHEEL HingeJoint {
-      jointParameters HingeJointParameters {
-        anchor -0.20 0 -0.25
-        axis 1 0 0
-      }
-      device RotationalMotor {
-        name "left_motor"
-        maxVelocity 30
-        maxTorque 100
-      }
-      endPoint Solid {
-        name "left_wheel"
-        translation -0.20 0 -0.25
-        rotation 0 0 1 1.5708
-        children [ DEF WHEEL Shape {
-          appearance PBRAppearance { baseColor 0.15 0.15 0.15 roughness 0.9 }
-          geometry Cylinder { radius 0.12 height 0.12 }
-        }]
-        boundingObject USE WHEEL
-        physics Physics { density 300 }
-      }
-    }
-
-    # Right wheel
-    DEF RIGHT_WHEEL HingeJoint {
-      jointParameters HingeJointParameters {
-        anchor 0.20 0 -0.25
-        axis 1 0 0
-      }
-      device RotationalMotor {
-        name "right_motor"
-        maxVelocity 30
-        maxTorque 100
-      }
-      endPoint Solid {
-        name "right_wheel"
-        translation 0.20 0 -0.25
-        rotation 0 0 1 1.5708
-        children [ USE WHEEL ]
-        boundingObject USE WHEEL
-        physics Physics { density 300 }
-      }
-    }
-
-    # Front caster
-    DEF CASTER BallJoint {
-      jointParameters BallJointParameters {
-        anchor 0.10 0 0.20
-      }
-      endPoint Solid {
-        name "caster"
-        translation 0.10 -0.08 0.20
-        children [ Shape {
-          appearance PBRAppearance { baseColor 0.3 0.3 0.3 roughness 0.9 }
-          geometry Sphere { radius 0.04 }
-        }]
-        boundingObject Sphere { radius 0.04 }
-        physics Physics { density 500 }
-      }
-    }
-  ]
-  boundingObject Transform {
-    translation 0 0.06 0
-    children [ Box { size 0.55 0.28 0.55 } ]
-  }
-  physics Physics {
-    density 600
-    centerOfMass [ 0 0 0 ]
+  boundingObject Cylinder {
+    radius 55
+    height 10
   }
 }
