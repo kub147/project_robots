@@ -48,18 +48,11 @@ Solid {
   locked TRUE
 }
 
-Robot {
-  name "robot"
+Solid {
+  name "robot_marker"
   translation -2010 8 -2040
   rotation 0 1 0 0
-  controller "void"
   children [
-    GPS {
-      name "gps"
-    }
-    Compass {
-      name "compass"
-    }
     Shape {
       appearance PBRAppearance {
         baseColor 0.05 0.35 1
@@ -89,4 +82,5 @@ Robot {
     radius 55
     height 10
   }
+  locked TRUE
 }
