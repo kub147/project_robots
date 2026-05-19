@@ -1,0 +1,6 @@
+numpy
+rasterio
+matplotlib
+pygame
+scipy
+pillow

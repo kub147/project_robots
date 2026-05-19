@@ -178,6 +178,45 @@ python navigation.py
 
 Then click the start and goal points on the displayed map.
 
+Run the Webots simulation:
+
+```bash
+./webots/scripts/open_webots.sh
+```
+
+This opens `webots/worlds/terrain_navigation.wbt`, loads the exported waypoint
+JSON, and runs the `path_follower` controller inside Webots. It does not use the
+Pygame 2D demo window.
+
+To export a route that better follows road-like areas in the satellite view:
+
+```bash
+python3 webots/scripts/export_webots.py Porto_City_512 \
+  --start 52 55 \
+  --goal 462 455 \
+  --road-biased
+```
+
+To regenerate the more realistic satellite texture used by Webots:
+
+```bash
+python3 webots/scripts/export_satellite_texture.py Porto_City_512 \
+  --size 2048 \
+  --format png \
+  --mode satellite \
+  --start 52 55 \
+  --goal 462 455
+```
+
+The Webots world keeps the real map extent at `5120 m x 5120 m`
+(`512 px x 10 m`). The texture can be upscaled for presentation quality without
+changing the robot coordinates or the planned path. The Webots world references
+`webots/worlds/textures/current_satellite.png`. The exporter applies the same
+planner-grid orientation used by the Webots waypoint export, then writes
+`webots/worlds/textures/Porto_City_512_webots_alignment_preview.png` with the
+path drawn over the texture. Use that preview to confirm the map and robot route
+still agree before opening Webots.
+
 ## Next Steps
 
 After the current stage, the main things still to do are:

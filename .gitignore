@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local editor/runtime files
+.DS_Store
+
+# Webots local project state and generated previews
+*.wbproj
+webots/worlds/.*.jpg
+webots/controllers/*/config.ini

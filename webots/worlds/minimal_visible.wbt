@@ -1,0 +1,65 @@
+#VRML_SIM R2025a utf8
+
+WorldInfo {
+  coordinateSystem "ENU"
+  basicTimeStep 16
+}
+
+Viewpoint {
+  position 0 -8 5
+  orientation 0.577350 0.577350 0.577350 2.094395
+  fieldOfView 0.9
+  near 0.1
+  far 100
+}
+
+Background {
+  skyColor [
+    0.65 0.75 0.95
+  ]
+}
+
+DirectionalLight {
+  direction 0.3 0.4 -1
+  intensity 1
+}
+
+Solid {
+  translation 0 0 -0.025
+  name "floor"
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.75 0.75 0.75
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 10 10 0.05
+      }
+    }
+  ]
+  boundingObject Box {
+    size 10 10 0.05
+  }
+}
+
+Solid {
+  translation 0 0 0.5
+  name "red_cube"
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 1 0.05 0.05
+        roughness 0.4
+        metalness 0
+      }
+      geometry Box {
+        size 1 1 1
+      }
+    }
+  ]
+  boundingObject Box {
+    size 1 1 1
+  }
+}

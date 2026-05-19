@@ -1,92 +1,137 @@
 #VRML_SIM R2025a utf8
 
 WorldInfo {
-  title "Terrain Navigation - Top Down Debug"
-  basicTimeStep 16
-  northDirection [0 0 1]
+  coordinateSystem "ENU"
+  title "Terrain Navigation - Porto Satellite"
+  basicTimeStep 32
 }
 
 Viewpoint {
-  orientation 1 0 0 -1.5708
-  position 0 7200 0
-  fieldOfView 0.75
-  description "Top view"
+  position 0 0 5000
+  orientation 0 0 1 0
+  fieldOfView 0.85
+  near 5
+  far 0
+  description "Top-down map view"
 }
 
 Background {
   skyColor [
-    0.78 0.82 0.88
+    0.18 0.20 0.22
   ]
 }
 
 DirectionalLight {
-  direction 0 -1 0
-  intensity 1.5
+  direction 0.2 0.3 -1
+  intensity 1
 }
 
-Solid {
+DEF terrain_map Solid {
+  translation 0 0 -0.02
   name "terrain_map"
-  translation 0 -0.05 0
+  locked TRUE
   children [
     Shape {
-      appearance PBRAppearance {
-        baseColorMap ImageTexture {
-          url [
-            "textures/current_display.png"
-          ]
-          repeatS FALSE
-          repeatT FALSE
+      appearance Appearance {
+        material Material {
+          diffuseColor 1 1 1
+          ambientIntensity 1
         }
-        roughness 1
-        metalness 0
+        texture ImageTexture {
+          url [
+            "textures/current_satellite.png"
+          ]
+        }
       }
       geometry Box {
-        size 5120 0.1 5120
+        size 5120 5120 0.04
       }
     }
   ]
-  locked TRUE
+  boundingObject Box {
+    size 5120 5120 0.04
+  }
 }
 
-Robot {
-  name "robot"
-  translation -2010 8 -2040
-  rotation 0 1 0 0
-  controller "void"
+DEF start_marker Solid {
+  translation -2010 -2040 35
+  name "start_marker"
   children [
-    GPS {
-      name "gps"
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0 1 0
+        emissiveColor 0 0.25 0
+        roughness 0.5
+        metalness 0
+      }
+      geometry Sphere {
+        radius 70
+      }
     }
-    Compass {
-      name "compass"
+  ]
+}
+
+DEF goal_marker Solid {
+  translation 1990 2060 35
+  name "goal_marker"
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 1 0 0
+        emissiveColor 0.35 0 0
+        roughness 0.5
+        metalness 0
+      }
+      geometry Sphere {
+        radius 70
+      }
     }
+  ]
+}
+
+DEF PATH_ROBOT Robot {
+  name "robot"
+  translation -2010 -2040 90
+  rotation 0 0 1 0
+  supervisor TRUE
+  controller "path_follower"
+  controllerArgs [
+    "--scene" "Porto_City_512"
+    "--start" "52" "55"
+    "--goal" "462" "455"
+  ]
+  children [
     Shape {
       appearance PBRAppearance {
         baseColor 0.05 0.35 1
+        emissiveColor 0.01 0.08 0.20
         roughness 0.4
+        metalness 0
       }
       geometry Cylinder {
-        radius 55
-        height 10
+        radius 70
+        height 45
       }
     }
-    Transform {
-      translation 0 8 42
+    Pose {
+      translation 0 65 26
       children [
         Shape {
           appearance PBRAppearance {
-            baseColor 1 0.05 0.02
+            baseColor 1 0.95 0.2
+            emissiveColor 0.35 0.28 0
             roughness 0.4
+            metalness 0
           }
           geometry Box {
-            size 22 8 70
+            size 28 110 18
           }
         }
       ]
     }
   ]
   boundingObject Cylinder {
-    radius 55
-    height 10
+    radius 70
+    height 45
   }
 }

@@ -117,6 +117,32 @@ def export_cost_texture(scene_name, cost_map):
     return path
 
 
+def build_road_biased_cost_map(terrain_map, fallback_cost_map):
+    """Build a Webots-demo planning cost that strongly prefers road-like cells."""
+    if terrain_map is None:
+        return fallback_cost_map
+
+    return np.select(
+        [
+            terrain_map == 2,  # road / urban
+            terrain_map == 3,  # barren / open / path-like
+            terrain_map == 4,  # meadow
+            terrain_map == 5,  # forest
+            terrain_map == 1,  # wetland / river edge
+            terrain_map == 0,  # water
+        ],
+        [
+            1.0,
+            2.3,
+            8.0,
+            25.0,
+            80.0,
+            160.0,
+        ],
+        default=12.0,
+    ).astype(np.float32)
+
+
 def export_waypoints(scene_name, path_cells, start, goal, display_map, cost_map, terrain_map):
     """
     Export the planned path as a JSON waypoint file.
@@ -222,6 +248,8 @@ def main():
                         help="Maximum number of waypoints (default: 200)")
     parser.add_argument("--cost-texture", action="store_true",
                         help="Also export cost map as texture")
+    parser.add_argument("--road-biased", action="store_true",
+                        help="Prefer road/open urban cells more strongly for the Webots visual route")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -294,8 +322,12 @@ def main():
         print("  ℹ  Computing A* path...")
         try:
             from navigation import GridPlanner
+            planning_cost_map = cost_map
+            if args.road_biased:
+                print("  ℹ  Using road-biased planning costs for Webots visualization...")
+                planning_cost_map = build_road_biased_cost_map(terrain_map, cost_map)
             planner = GridPlanner(cost_map.shape[0], cost_map.shape[1])
-            path_cells = planner.plan(cost_map, start, goal, use_heuristic=True)
+            path_cells = planner.plan(planning_cost_map, start, goal, use_heuristic=True)
             if path_cells is None:
                 print("  ✗  A* could not find a path. Try different start/goal.")
                 sys.exit(1)

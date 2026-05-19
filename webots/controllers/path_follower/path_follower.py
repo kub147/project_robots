@@ -1,237 +1,280 @@
 """
-path_follower.py — Webots robot controller for GPS + Compass waypoint following.
+Webots controller that follows exported planner waypoints.
+
+The current world uses a simple visual Robot node on a top-down terrain map,
+so this controller moves that node kinematically with the Supervisor API. This
+keeps the Webots demo aligned with the Python planner without requiring a
+physical wheel model yet.
 """
 
-import os
-import math
-import json
 import glob
+import json
+import math
+import os
+import sys
 
 try:
-    from controller import Robot, GPS, Compass, Gyro, Motor
+    from controller import Supervisor
 except ImportError:
-    import sys
     print("=" * 60)
-    print("  ERROR: Cannot import Webots Python controller library.")
+    print("ERROR: Cannot import the Webots Python controller library.")
     print("=" * 60)
     print()
-    print("  Fix: Webots → Preferences → Python command → set to:")
-    import sys as _sys
-    print(f"  {_sys.executable}")
-    print()
-    _sys.exit(1)
+    print("Fix in Webots: Preferences -> Python command -> set to:")
+    print(sys.executable)
+    sys.exit(1)
 
-# ── Configuration ──
+
 TIME_STEP = 16
-WHEEL_RADIUS = 0.12
-WHEEL_BASE = 0.40         # distance between wheels (x=-0.20 to x=0.20)
-MAX_MOTOR_VEL = 20.0
-ANGULAR_GAIN = 3.0
-MIN_SPEED = 0.5
-MAX_SPEED = 4.0
-WP_THRESHOLD = 3.0        # waypoint reach threshold (m)
-GOAL_THRESHOLD = 2.0
-LOOKAHEAD = 15.0
+ROBOT_Z = 90.0
+SPEED_MPS = 80.0
+WAYPOINT_THRESHOLD_M = 2.0
+PATH_MARKER_STEP = 12
+PATH_SEGMENT_WIDTH_M = 34.0
 
 PATHS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "../../paths")
 )
 
 
-def normalize_angle(a):
-    while a > math.pi:
-        a -= 2 * math.pi
-    while a < -math.pi:
-        a += 2 * math.pi
-    return a
-
-
-def heading_from_compass(values):
-    """Return heading in radians. 0 = +Z (North), +pi/2 = +X (East)."""
-    return math.atan2(values[0], values[2])
-
-
 def find_path_file(scene, start=None, goal=None):
-    cdir = os.path.dirname(os.path.abspath(__file__))
-    pdir = os.path.normpath(os.path.join(cdir, "../../paths"))
-    if not os.path.exists(pdir):
+    if not os.path.exists(PATHS_DIR):
         return None
-    pattern = f"{scene}_path_*.json"
-    matches = glob.glob(os.path.join(pdir, pattern))
-    if not matches:
-        return None
-    if start and goal:
-        exact = os.path.join(pdir, f"{scene}_path_{start[0]}_{start[1]}_{goal[0]}_{goal[1]}.json")
+
+    if scene and start and goal:
+        exact = os.path.join(
+            PATHS_DIR,
+            f"{scene}_path_{start[0]}_{start[1]}_{goal[0]}_{goal[1]}.json",
+        )
         if os.path.exists(exact):
             return exact
+
+    pattern = f"{scene}_path_*.json" if scene else "*_path_*.json"
+    matches = glob.glob(os.path.join(PATHS_DIR, pattern))
+    if not matches:
+        return None
+
     matches.sort(key=os.path.getmtime, reverse=True)
     return matches[0]
 
 
-def compute_commands(target_heading, current_heading, distance):
-    """
-    Differential drive control law.
-    Positive ω (right-left difference) = turn LEFT (CCW).
-    When target is to the RIGHT of heading: angle_error > 0.
-    To turn RIGHT: need ω < 0  →  right < left  →  left > right.
-    """
-    error = normalize_angle(target_heading - current_heading)
-    
-    # Speed ramp
-    frac = min(1.0, distance / LOOKAHEAD)
-    speed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * frac
-    
-    # Angular correction (rad/s)
-    angular = ANGULAR_GAIN * error
-    
-    # Linear wheel velocities in m/s
-    left_lin = speed + angular * WHEEL_BASE / 2.0
-    right_lin = speed - angular * WHEEL_BASE / 2.0
-    
-    # Convert to rad/s (motor velocity)
-    left = left_lin / WHEEL_RADIUS
-    right = right_lin / WHEEL_RADIUS
-    
-    # Clamp
-    for v in [left, right]:
-        if abs(v) > MAX_MOTOR_VEL:
-            scale = MAX_MOTOR_VEL / abs(v)
-            left *= scale
-            right *= scale
-    
-    return left, right, math.degrees(error)
-
-
-def main():
-    import sys
-    args = sys.argv[1:]
+def parse_args(args):
     scene = None
     start = None
     goal = None
     path_file = None
-    
+
     i = 0
     while i < len(args):
         if args[i] == "--scene" and i + 1 < len(args):
-            scene = args[i + 1]; i += 2
+            scene = args[i + 1]
+            i += 2
         elif args[i] == "--start" and i + 2 < len(args):
-            start = (int(args[i+1]), int(args[i+2])); i += 3
+            start = (int(args[i + 1]), int(args[i + 2]))
+            i += 3
         elif args[i] == "--goal" and i + 2 < len(args):
-            goal = (int(args[i+1]), int(args[i+2])); i += 3
+            goal = (int(args[i + 1]), int(args[i + 2]))
+            i += 3
         elif args[i] == "--path" and i + 1 < len(args):
-            path_file = args[i + 1]; i += 2
+            path_file = args[i + 1]
+            i += 2
         else:
             i += 1
 
-    robot = Robot()
-    timestep = int(robot.getBasicTimeStep())
-    
-    # Get devices
-    gps = robot.getDevice("gps"); gps.enable(timestep)
-    compass = robot.getDevice("compass"); compass.enable(timestep)
-    gyro = robot.getDevice("gyro"); gyro.enable(timestep)
-    left_motor = robot.getDevice("left_motor")
-    right_motor = robot.getDevice("right_motor")
-    left_motor.setPosition(float('inf'))
-    right_motor.setPosition(float('inf'))
-    left_motor.setVelocity(0.0)
-    right_motor.setVelocity(0.0)
-    
-    # Load path
-    if path_file is None and scene:
-        path_file = find_path_file(scene, start, goal)
-    if not path_file or not os.path.exists(path_file):
-        print(f"ERROR: no path file found. Run export_webots.py first.")
-        return
-    
+    return scene, start, goal, path_file
+
+
+def load_waypoints(path_file):
     with open(path_file) as f:
         data = json.load(f)
-    waypoints = data["path"]
-    total_wp = len(waypoints)
-    
-    xs = [wp["x_m"] for wp in waypoints]
-    zs = [wp["z_m"] for wp in waypoints]
-    
-    print(f"\n{'='*60}")
-    print(f"  Scene: {data['meta']['scene']}")
-    print(f"  Waypoints: {total_wp}")
-    print(f"  Distance: {data['metrics']['distance_m']:.0f} m")
-    print(f"  Start: ({xs[0]:.0f}, {zs[0]:.0f})")
-    print(f"  Goal:  ({xs[-1]:.0f}, {zs[-1]:.0f})")
-    print(f"{'='*60}\n")
-    
-    # Settle
-    for _ in range(5):
-        robot.step(timestep)
-    
-    # ── DIAGNOSTIC: print raw compass at start ──
-    cv = compass.getValues()
-    gv = gps.getValues()
-    h = heading_from_compass(cv)
-    print(f"  [DIAG] GPS: ({gv[0]:.1f}, {gv[1]:.1f}, {gv[2]:.1f})")
-    print(f"  [DIAG] Raw compass: ({cv[0]:.4f}, {cv[1]:.4f}, {cv[2]:.4f})")
-    print(f"  [DIAG] Heading: {math.degrees(h):.0f} deg (0=+Z, +90=+X)")
-    print()
-    
-    # Navigation loop
-    current_wp = 0
-    step = 0
-    heading = h
-    
-    while robot.step(timestep) != -1:
-        step += 1
-        
-        gv = gps.getValues()
-        cv = compass.getValues()
-        heading = heading_from_compass(cv)
-        
-        rx, rz = gv[0], gv[2]
-        
-        # Check if we've reached all waypoints
-        if current_wp >= total_wp:
-            left_motor.setVelocity(0.0)
-            right_motor.setVelocity(0.0)
-            if step % 50 == 0:
-                print(f"  ✓ GOAL REACHED! Stopped.")
+
+    waypoints = [(float(point["x_m"]), float(point["z_m"])) for point in data["path"]]
+    if not waypoints:
+        raise ValueError(f"No waypoints in {path_file}")
+
+    return data, waypoints
+
+
+def set_pose(translation_field, rotation_field, x, y, heading):
+    translation_field.setSFVec3f([x, y, ROBOT_Z])
+    rotation_field.setSFRotation([0.0, 0.0, 1.0, heading])
+
+
+def add_path_line(supervisor, waypoints):
+    root_children = supervisor.getRoot().getField("children")
+    segment_template = """
+Solid {{
+  name "planned_path_segment"
+  translation {cx:.2f} {cy:.2f} 76.00
+  rotation 0 0 1 {rotation:.6f}
+  children [
+    Shape {{
+      appearance PBRAppearance {{
+        baseColor 1 0.74 0
+        emissiveColor 0.55 0.34 0
+        roughness 0.65
+        metalness 0
+      }}
+      geometry Box {{
+        size {width:.2f} {length:.2f} 10.00
+      }}
+    }}
+  ]
+}}
+"""
+
+    for start, end in zip(waypoints, waypoints[1:]):
+        x1, y1 = start
+        x2, y2 = end
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1.0:
             continue
-        
-        # Current target waypoint
-        tx, tz = xs[current_wp], zs[current_wp]
-        dx = tx - rx
-        dz = tz - rz
-        dist = math.hypot(dx, dz)
-        
-        # Check arrival
-        threshold = GOAL_THRESHOLD if current_wp == total_wp - 1 else WP_THRESHOLD
-        if dist < threshold:
-            if current_wp == total_wp - 1:
-                print(f"  ✓ GOAL REACHED at ({rx:.0f}, {rz:.0f})")
-                current_wp += 1
-                continue
-            else:
-                old = current_wp
-                current_wp += 1
-                if step % 20 == 0:
-                    print(f"  ✓ WP {old+1}/{total_wp} done → WP {current_wp+1}/{total_wp}")
-                continue
-        
-        # Compute target heading
-        target_h = math.atan2(dx, dz)
-        
-        # Get motor commands
-        left_v, right_v, err_deg = compute_commands(target_h, heading, dist)
-        
-        left_motor.setVelocity(left_v)
-        right_motor.setVelocity(right_v)
-        
-        # Status
-        if step % 50 == 0:
-            print(f"  [{step:5d}] WP {current_wp+1}/{total_wp} | "
-                  f"pos=({rx:.0f},{rz:.0f}) target=({tx:.0f},{tz:.0f}) "
-                  f"dist={dist:.0f}m heading={math.degrees(heading):.0f}° "
-                  f"err={err_deg:.0f}° L={left_v:.1f} R={right_v:.1f}")
-    
-    print("Simulation ended.")
+
+        root_children.importMFNodeFromString(
+            -1,
+            segment_template.format(
+                cx=(x1 + x2) / 2.0,
+                cy=(y1 + y2) / 2.0,
+                rotation=-math.atan2(dx, dy),
+                width=PATH_SEGMENT_WIDTH_M,
+                length=length + PATH_SEGMENT_WIDTH_M,
+            ),
+        )
+
+
+def add_visual_markers(supervisor, waypoints):
+    root_children = supervisor.getRoot().getField("children")
+    marker_template = """
+Solid {{
+  translation {x:.2f} {y:.2f} {z:.2f}
+  children [
+    Shape {{
+      appearance PBRAppearance {{
+        baseColor {r:.2f} {g:.2f} {b:.2f}
+        emissiveColor {er:.2f} {eg:.2f} {eb:.2f}
+        roughness 0.4
+      }}
+      geometry Sphere {{
+        radius {radius:.2f}
+      }}
+    }}
+  ]
+}}
+"""
+
+    for index, (x, y) in enumerate(waypoints):
+        if index % PATH_MARKER_STEP != 0 and index != len(waypoints) - 1:
+            continue
+        root_children.importMFNodeFromString(
+            -1,
+            marker_template.format(
+                x=x,
+                y=y,
+                z=55.0,
+                radius=18.0,
+                r=1.0,
+                g=0.86,
+                b=0.05,
+                er=0.35,
+                eg=0.25,
+                eb=0.0,
+            ),
+        )
+
+    sx, sy = waypoints[0]
+    gx, gy = waypoints[-1]
+    root_children.importMFNodeFromString(
+        -1,
+        marker_template.format(
+            x=sx,
+            y=sy,
+            z=70.0,
+            radius=75.0,
+            r=0.0,
+            g=0.85,
+            b=0.18,
+            er=0.0,
+            eg=0.25,
+            eb=0.04,
+        ),
+    )
+    root_children.importMFNodeFromString(
+        -1,
+        marker_template.format(
+            x=gx,
+            y=gy,
+            z=70.0,
+            radius=75.0,
+            r=1.0,
+            g=0.08,
+            b=0.04,
+            er=0.35,
+            eg=0.02,
+            eb=0.0,
+        ),
+    )
+
+
+def main():
+    scene, start, goal, path_file = parse_args(sys.argv[1:])
+
+    if path_file is None:
+        path_file = find_path_file(scene, start, goal)
+    if not path_file or not os.path.exists(path_file):
+        print("ERROR: no path file found. Run webots/scripts/export_webots.py first.")
+        return
+
+    data, waypoints = load_waypoints(path_file)
+
+    supervisor = Supervisor()
+    timestep = int(supervisor.getBasicTimeStep()) or TIME_STEP
+    robot_node = supervisor.getSelf()
+    translation_field = robot_node.getField("translation")
+    rotation_field = robot_node.getField("rotation")
+
+    x, y = waypoints[0]
+    target_index = 1 if len(waypoints) > 1 else 0
+    heading = 0.0
+    set_pose(translation_field, rotation_field, x, y, heading)
+    add_path_line(supervisor, waypoints)
+    add_visual_markers(supervisor, waypoints)
+
+    print("=" * 60)
+    print(f"Scene: {data['meta']['scene']}")
+    print(f"Path file: {path_file}")
+    print(f"Waypoints: {len(waypoints)}")
+    print(f"Distance: {data['metrics']['distance_m']:.0f} m")
+    print(f"Start: ({waypoints[0][0]:.0f}, {waypoints[0][1]:.0f})")
+    print(f"Goal:  ({waypoints[-1][0]:.0f}, {waypoints[-1][1]:.0f})")
+    print("=" * 60)
+
+    while supervisor.step(timestep) != -1:
+        if target_index >= len(waypoints):
+            continue
+
+        tx, ty = waypoints[target_index]
+        dx = tx - x
+        dy = ty - y
+        distance = math.hypot(dx, dy)
+
+        if distance <= WAYPOINT_THRESHOLD_M:
+            target_index += 1
+            if target_index >= len(waypoints):
+                x, y = waypoints[-1]
+                set_pose(translation_field, rotation_field, x, y, heading)
+                print("Goal reached.")
+            continue
+
+        step_distance = SPEED_MPS * (timestep / 1000.0)
+        travel = min(step_distance, distance)
+        ux = dx / distance
+        uy = dy / distance
+        x += ux * travel
+        y += uy * travel
+        heading = -math.atan2(ux, uy)
+        set_pose(translation_field, rotation_field, x, y, heading)
 
 
 if __name__ == "__main__":
