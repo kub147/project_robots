@@ -184,6 +184,15 @@ Run the Webots simulation:
 ./webots/scripts/open_webots.sh
 ```
 
+Pass controller arguments after the script name to test the camera and learning
+modes without editing the `.wbt` file:
+
+```bash
+./webots/scripts/open_webots.sh --mode diagnostic
+./webots/scripts/open_webots.sh --mode heuristic
+./webots/scripts/open_webots.sh --mode rl-follow --train
+```
+
 This opens `webots/worlds/terrain_navigation.wbt`, loads the exported waypoint
 JSON, and runs the `path_follower` controller inside Webots. It does not use the
 Pygame 2D demo window.
@@ -191,19 +200,23 @@ Pygame 2D demo window.
 To export a route that better follows road-like areas in the satellite view:
 
 ```bash
-python3 webots/scripts/export_webots.py Porto_City_512 \
+./webots/scripts/run_export.sh Porto_City_512 \
   --start 52 55 \
   --goal 462 455 \
   --road-biased
 ```
 
-To regenerate the more realistic satellite texture used by Webots:
+The Webots exporter now also redraws `current_satellite.png` with the selected
+path embedded directly into the ground texture as a high-contrast magenta line.
+This is the visual line used by the downward-facing robot camera. To regenerate
+only the texture manually:
 
 ```bash
-python3 webots/scripts/export_satellite_texture.py Porto_City_512 \
+./.venv/bin/python webots/scripts/export_satellite_texture.py Porto_City_512 \
   --size 2048 \
   --format png \
   --mode satellite \
+  --draw-path \
   --start 52 55 \
   --goal 462 455
 ```
@@ -216,6 +229,15 @@ planner-grid orientation used by the Webots waypoint export, then writes
 `webots/worlds/textures/Porto_City_512_webots_alignment_preview.png` with the
 path drawn over the texture. Use that preview to confirm the map and robot route
 still agree before opening Webots.
+
+The `path_follower` controller supports these Webots controller modes:
+
+```text
+--mode waypoint      # default, old waypoint-following demo
+--mode diagnostic   # waypoint following plus camera line-feature logs
+--mode heuristic    # camera-based line following baseline
+--mode rl-follow    # tabular Q-learning line follower; add --train to train
+```
 
 ## Next Steps
 

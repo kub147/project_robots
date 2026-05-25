@@ -53,42 +53,6 @@ DEF terrain_map Solid {
   }
 }
 
-DEF start_marker Solid {
-  translation -2010 -2040 35
-  name "start_marker"
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0 1 0
-        emissiveColor 0 0.25 0
-        roughness 0.5
-        metalness 0
-      }
-      geometry Sphere {
-        radius 70
-      }
-    }
-  ]
-}
-
-DEF goal_marker Solid {
-  translation 1990 2060 35
-  name "goal_marker"
-  children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 1 0 0
-        emissiveColor 0.35 0 0
-        roughness 0.5
-        metalness 0
-      }
-      geometry Sphere {
-        radius 70
-      }
-    }
-  ]
-}
-
 DEF PATH_ROBOT Robot {
   name "robot"
   translation -2010 -2040 90
@@ -101,20 +65,58 @@ DEF PATH_ROBOT Robot {
     "--goal" "462" "455"
   ]
   children [
-    Shape {
-      appearance PBRAppearance {
-        baseColor 0.05 0.35 1
-        emissiveColor 0.01 0.08 0.20
-        roughness 0.4
-        metalness 0
-      }
-      geometry Cylinder {
-        radius 70
-        height 45
-      }
+    Pose {
+      translation 0 0 8
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.05 0.35 1
+            emissiveColor 0.01 0.08 0.20
+            roughness 0.4
+            metalness 0
+          }
+          geometry Box {
+            size 150 210 55
+          }
+        }
+      ]
     }
     Pose {
-      translation 0 65 26
+      translation -92 0 0
+      rotation 1 0 0 1.5708
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.02 0.025 0.03
+            roughness 0.65
+            metalness 0
+          }
+          geometry Cylinder {
+            radius 38
+            height 24
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 92 0 0
+      rotation 1 0 0 1.5708
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.02 0.025 0.03
+            roughness 0.65
+            metalness 0
+          }
+          geometry Cylinder {
+            radius 38
+            height 24
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 80 44
       children [
         Shape {
           appearance PBRAppearance {
@@ -124,14 +126,55 @@ DEF PATH_ROBOT Robot {
             metalness 0
           }
           geometry Box {
-            size 28 110 18
+            size 44 116 20
+          }
+        }
+      ]
+    }
+    Camera {
+      translation 0 62 -50
+      rotation 0 1 0 1.5708
+      name "path camera"
+      fieldOfView 1.55
+      width 96
+      height 96
+      antiAliasing TRUE
+      noise 0.01
+    }
+    Pose {
+      translation 0 -86 42
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.08 0.12 0.18
+            roughness 0.45
+            metalness 0
+          }
+          geometry Box {
+            size 76 34 24
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0 44
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.8 0.88 1
+            emissiveColor 0.02 0.04 0.08
+            roughness 0.3
+            metalness 0
+          }
+          geometry Cylinder {
+            radius 44
+            height 18
           }
         }
       ]
     }
   ]
-  boundingObject Cylinder {
-    radius 70
-    height 45
+  boundingObject Box {
+    size 190 230 70
   }
 }

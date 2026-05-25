@@ -235,6 +235,40 @@ def downsample_path(path_cells, max_points=200):
     return [path_cells[i] for i in indices]
 
 
+def export_satellite_texture_with_path(scene, start, goal, size, mode):
+    """Regenerate the Webots ground texture with the exported path drawn on it."""
+    from webots.scripts.export_satellite_texture import (
+        build_webots_texture,
+        draw_path_overlay,
+        load_path_data,
+        save_alignment_preview,
+        save_texture,
+        to_webots_texture_orientation,
+    )
+
+    scene_path = os.path.join(PROJECT_ROOT, "scenes", f"{scene}.tif")
+    if not os.path.exists(scene_path):
+        print(f"  ⚠  Scene source not found, skipping path texture: {scene_path}")
+        return
+
+    image = build_webots_texture(scene, scene_path, size, mode)
+    image = to_webots_texture_orientation(image)
+    path_data = load_path_data(scene, start, goal)
+    if path_data is None:
+        print("  ⚠  No path data found, skipping path texture overlay.")
+        return
+
+    draw_path_overlay(image, path_data, size)
+    scene_output = os.path.join(TEXTURES_DIR, f"{scene}_satellite_{size}.png")
+    current_output = os.path.join(TEXTURES_DIR, "current_satellite.png")
+    save_texture(image, scene_output, "PNG")
+    save_texture(image, current_output, "PNG")
+    preview_output = save_alignment_preview(image, scene, size, start, goal)
+    print(f"  ✓  Saved path ground texture: {current_output}")
+    if preview_output:
+        print(f"  ✓  Saved alignment preview: {preview_output}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Export Python planner data for Webots")
     parser.add_argument("scene", help="Scene name (e.g., Douro_Vineyards_512)")
@@ -250,6 +284,12 @@ def main():
                         help="Also export cost map as texture")
     parser.add_argument("--road-biased", action="store_true",
                         help="Prefer road/open urban cells more strongly for the Webots visual route")
+    parser.add_argument("--no-path-texture", action="store_true",
+                        help="Do not redraw current_satellite.png with the path on the ground")
+    parser.add_argument("--texture-size", type=int, default=2048,
+                        help="Size of the Webots satellite texture generated with the path (default: 2048)")
+    parser.add_argument("--texture-mode", choices=("hybrid", "satellite", "terrain"), default="satellite",
+                        help="Texture style used when drawing the ground path")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -345,6 +385,8 @@ def main():
 
     # 6. Export waypoints
     export_waypoints(scene, path_cells, start, goal, display_map, cost_map, terrain_map)
+    if not args.no_path_texture:
+        export_satellite_texture_with_path(scene, start, goal, args.texture_size, args.texture_mode)
 
     print(f"\nDone! You can now open Webots with:")
     print(f"  webots/worlds/terrain_navigation.wbt")

@@ -18,6 +18,8 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 TEXTURES_DIR = PROJECT_ROOT / "webots" / "worlds" / "textures"
 PATHS_DIR = PROJECT_ROOT / "webots" / "paths"
 TARGET_GRID_SIZE = 512
+PATH_COLOR = (255, 0, 255)
+PATH_OUTLINE_COLOR = (20, 0, 20)
 
 
 def stretch_band(band):
@@ -103,13 +105,43 @@ def find_path_file(scene, start=None, goal=None):
     return matches[0] if matches else None
 
 
-def save_alignment_preview(image, scene, output_size, start=None, goal=None):
+def path_points_for_image(data, output_size):
+    scale = output_size / TARGET_GRID_SIZE
+
+    def point_from_grid(row, col):
+        x = col * scale
+        y = (TARGET_GRID_SIZE - 1 - row) * scale
+        return x, y
+
+    return [point_from_grid(point["row"], point["col"]) for point in data["path"]]
+
+
+def draw_path_overlay(image, data, output_size, line_width=None):
+    draw = ImageDraw.Draw(image)
+    points = path_points_for_image(data, output_size)
+    if len(points) < 2:
+        return image
+
+    width = line_width or max(6, output_size // 220)
+    outline_width = width + max(3, output_size // 512)
+    draw.line(points, fill=PATH_OUTLINE_COLOR, width=outline_width, joint="curve")
+    draw.line(points, fill=PATH_COLOR, width=width, joint="curve")
+    return image
+
+
+def load_path_data(scene, start=None, goal=None):
     path_file = find_path_file(scene, start, goal)
     if path_file is None:
         return None
 
     with path_file.open() as f:
-        data = json.load(f)
+        return json.load(f)
+
+
+def save_alignment_preview(image, scene, output_size, start=None, goal=None):
+    data = load_path_data(scene, start, goal)
+    if data is None:
+        return None
 
     preview = image.copy()
     draw = ImageDraw.Draw(preview)
@@ -120,9 +152,7 @@ def save_alignment_preview(image, scene, output_size, start=None, goal=None):
         y = (TARGET_GRID_SIZE - 1 - row) * scale
         return x, y
 
-    points = [point_from_grid(point["row"], point["col"]) for point in data["path"]]
-    if len(points) >= 2:
-        draw.line(points, fill=(255, 220, 0), width=max(6, output_size // 128), joint="curve")
+    draw_path_overlay(preview, data, output_size)
 
     sx, sy = point_from_grid(data["start"]["row"], data["start"]["col"])
     gx, gy = point_from_grid(data["goal"]["row"], data["goal"]["col"])
@@ -174,6 +204,11 @@ def main():
     )
     parser.add_argument("--start", type=int, nargs=2, metavar=("row", "col"), help="Optional start cell for alignment preview.")
     parser.add_argument("--goal", type=int, nargs=2, metavar=("row", "col"), help="Optional goal cell for alignment preview.")
+    parser.add_argument(
+        "--draw-path",
+        action="store_true",
+        help="Draw the selected planner path directly onto the exported ground texture.",
+    )
     args = parser.parse_args()
 
     scene_path = SCENES_DIR / f"{args.scene}.tif"
@@ -183,6 +218,11 @@ def main():
     TEXTURES_DIR.mkdir(parents=True, exist_ok=True)
     image = build_webots_texture(args.scene, scene_path, args.size, args.mode)
     image = to_webots_texture_orientation(image)
+    if args.draw_path:
+        path_data = load_path_data(args.scene, args.start, args.goal)
+        if path_data is None:
+            raise SystemExit("No exported path found for --draw-path. Run export_webots.py first or pass matching --start/--goal.")
+        draw_path_overlay(image, path_data, args.size)
 
     extension = "jpg" if args.format in ("jpg", "jpeg") else "png"
     image_format = "JPEG" if extension == "jpg" else "PNG"
